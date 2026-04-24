@@ -5,8 +5,8 @@ Fetches rosters and current season stats for a MiLB game via the public MLB Stat
 ## What it does
 
 Given a game, the script:
-- Prints both teams' batting orders, pitching staffs, and bench players to the console
-- Writes the same data — with stats — to a configured Google Sheet
+- Prints both teams' rosters and stats to the console
+- Writes the same data to a configured Google Sheet with a **stable, fixed layout** so cell addresses never change between runs
 
 Stats shown:
 - **Batters:** AVG, HR, RBI, OPS, SB
@@ -53,25 +53,54 @@ Game PKs are shown in the schedule listing. You can also find them on [MLB.com](
 
 ## Google Sheet
 
-Data is written to [this sheet](https://docs.google.com/spreadsheets/d/1ta8zudzUeu6srDFbuSgstAcrjPLgLobnT7snMDEuAkg). The sheet is cleared and rewritten each run. Layout:
+Data is written to [this sheet](https://docs.google.com/spreadsheets/d/1ta8zudzUeu6srDFbuSgstAcrjPLgLobnT7snMDEuAkg). The sheet is cleared and rewritten on each run.
+
+### Layout
 
 ```
-Game <PK>  <Away> @ <Home>  <Date>  <Status>
-
-AWAY TEAM
-#  POS  Name  AVG  HR  RBI  OPS  SB
-...batting order rows...
-
-Role  Name  ERA  W-L  IP  K  WHIP
-...pitcher rows...
-
-   POS  Name  AVG  HR  RBI  OPS  SB
-...bench rows...
-
-
-HOME TEAM
-...same structure...
+Row 1:  Game <PK>  |  <Away> @ <Home>  |  <Date>  |  <Status>
+Row 2:  (blank)
+Rows 3–6:   SCORE section
+Row 7:  (blank)
+Rows 8–90:  Away team sections
+Rows 91–92: (blank)
+Rows 93–175: Home team sections
 ```
+
+### Score section (4 rows, always rows 3–6)
+
+```
+SCORE
+      Team                    R   H   E
+Away  <away team name>        #   #   #
+Home  <home team name>        #   #   #
+```
+
+### Per-team sections (83 rows each, fixed)
+
+Each team block contains four sections. Row offsets are relative to the start of the team block.
+
+| Rows | Section | Columns |
+|------|---------|---------|
+| 1 | Team name | |
+| 2 | *(blank)* | |
+| 3 | `BATTING ORDER` label | |
+| 4 | Headers | `#  POS  Jersey  Name  AVG  HR  RBI  OPS  SB` |
+| 5–13 | Batting order (9 rows, padded with blanks if lineup not yet submitted) | |
+| 14 | *(blank)* | |
+| 15 | `CURRENT PITCHER` label | |
+| 16 | Headers | `Role  Jersey  Name  ERA  W-L  IP  K  WHIP` |
+| 17 | Current pitcher (blank pre-game) | |
+| 18 | *(blank)* | |
+| 19 | `PITCHING STAFF` label | |
+| 20 | Headers | `Role  Jersey  Name  ERA  W-L  IP  K  WHIP` |
+| 21–50 | Pitching staff (30 rows, padded) | |
+| 51 | *(blank)* | |
+| 52 | `HITTERS` label | |
+| 53 | Headers | `POS  Jersey  Name  AVG  HR  RBI  OPS  SB` |
+| 54–83 | All hitters (30 rows, padded) | |
+
+Because every section has a fixed row count, you can write Google Sheets formulas or conditional formatting that reference specific rows and they will remain valid whether the script is run before the game, during it, or after.
 
 ## Files
 

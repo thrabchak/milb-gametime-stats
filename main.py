@@ -38,6 +38,13 @@ SPREADSHEET_ID = "1ta8zudzUeu6srDFbuSgstAcrjPLgLobnT7snMDEuAkg"
 # Full read/write scope required; if token.json has only readonly it will be replaced.
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
+# Fixed row counts per section — keep these constant so each player's cell
+# address never changes between runs, regardless of game state.
+LINEUP_SIZE = 9
+CURRENT_PITCHER_SIZE = 1
+PITCHING_STAFF_SIZE = 30
+HITTER_SIZE = 30
+
 
 # ── MLB Stats API ──────────────────────────────────────────────────────────────
 
@@ -244,49 +251,64 @@ def display_roster(side, boxscore):
     print(f"  {team_name.upper()}")
     print(f"{'=' * 72}")
 
-    # Lineup: use submitted batting order, else fall back to all non-pitchers
-    lineup_ids = batting_order or [
-        int(k[2:]) for k, p in players.items()
-        if p.get("position", {}).get("type") != "Pitcher"
-    ]
+    all_hitter_ids = list(batting_order) + [p for p in bench if p not in set(batting_order)]
+    all_pitcher_ids = pitchers + bullpen
+    current_pitcher_id = pitchers[-1] if pitchers else None
 
-    # Pitching: in-game pitchers if available, else the available bullpen
-    pitcher_ids = pitchers or bullpen
-
-    # --- Batting order ---
-    print(f"\n  {'#':>2}  {'POS':<4}  {'NAME':<27}  SEASON STATS")
-    print(f"  {'-' * 68}")
-    for i, pid in enumerate(lineup_ids):
-        p = players.get(f"ID{pid}", {})
-        pos = p.get("position", {}).get("abbreviation", "?")
-        name = p.get("person", {}).get("fullName", "Unknown")
-        hitting = p.get("seasonStats", {}).get("batting", {})
-        order = str(i + 1) if batting_order else ""
-        print(f"  {order:>2}  {pos:<4}  {name:<27}  {fmt_hitting(hitting)}")
-
-    # --- Pitching staff ---
-    if pitcher_ids:
-        print(f"\n  {'ROLE':<5}  {'NAME':<29}  SEASON STATS")
-        print(f"  {'-' * 68}")
-        for i, pid in enumerate(pitcher_ids):
-            p = players.get(f"ID{pid}", {})
-            name = p.get("person", {}).get("fullName", "Unknown")
-            pitching = p.get("seasonStats", {}).get("pitching", {})
-            # Only label SP if we haven't tracked in-game pitchers yet;
-            # once pitchers list is non-empty we know who actually started.
-            role = "SP" if i == 0 else "RP"
-            print(f"  {role:<5}  {name:<29}  {fmt_pitching(pitching)}")
-
-    # --- Bench ---
-    if bench:
-        print(f"\n  {'':>2}  {'POS':<4}  BENCH")
-        print(f"  {'-' * 68}")
-        for pid in bench:
+    # --- BATTING ORDER ---
+    print(f"\n  BATTING ORDER")
+    print(f"  {'#':>2}  {'POS':<4}  {'#':>3}  {'NAME':<27}  SEASON STATS")
+    print(f"  {'-' * 72}")
+    if batting_order:
+        for i, pid in enumerate(batting_order):
             p = players.get(f"ID{pid}", {})
             pos = p.get("position", {}).get("abbreviation", "?")
+            jersey = p.get("jerseyNumber", "")
             name = p.get("person", {}).get("fullName", "Unknown")
             hitting = p.get("seasonStats", {}).get("batting", {})
-            print(f"  {'':>2}  {pos:<4}  {name:<27}  {fmt_hitting(hitting)}")
+            print(f"  {i + 1:>2}  {pos:<4}  {jersey:>3}  {name:<27}  {fmt_hitting(hitting)}")
+    else:
+        print(f"  {'':>2}  {'':4}  {'':3}  (lineup not yet submitted)")
+
+    # --- CURRENT PITCHER ---
+    print(f"\n  CURRENT PITCHER")
+    print(f"  {'ROLE':<5}  {'#':>3}  {'NAME':<29}  SEASON STATS")
+    print(f"  {'-' * 72}")
+    if current_pitcher_id:
+        p = players.get(f"ID{current_pitcher_id}", {})
+        jersey = p.get("jerseyNumber", "")
+        name = p.get("person", {}).get("fullName", "Unknown")
+        pitching = p.get("seasonStats", {}).get("pitching", {})
+        role = "SP" if pitchers[0] == current_pitcher_id else "RP"
+        print(f"  {role:<5}  {jersey:>3}  {name:<29}  {fmt_pitching(pitching)}")
+    else:
+        print(f"  {'':5}  {'':3}  (pre-game)")
+
+    # --- PITCHING STAFF ---
+    print(f"\n  PITCHING STAFF")
+    print(f"  {'ROLE':<5}  {'#':>3}  {'NAME':<29}  SEASON STATS")
+    print(f"  {'-' * 72}")
+    for i, pid in enumerate(all_pitcher_ids):
+        p = players.get(f"ID{pid}", {})
+        jersey = p.get("jerseyNumber", "")
+        name = p.get("person", {}).get("fullName", "Unknown")
+        pitching = p.get("seasonStats", {}).get("pitching", {})
+        # Only label SP if we haven't tracked in-game pitchers yet;
+        # once pitchers list is non-empty we know who actually started.
+        role = "SP" if i == 0 else "RP"
+        print(f"  {role:<5}  {jersey:>3}  {name:<29}  {fmt_pitching(pitching)}")
+
+    # --- HITTERS ---
+    print(f"\n  HITTERS")
+    print(f"  {'':>2}  {'POS':<4}  {'#':>3}  {'NAME':<27}  SEASON STATS")
+    print(f"  {'-' * 72}")
+    for pid in all_hitter_ids:
+        p = players.get(f"ID{pid}", {})
+        pos = p.get("position", {}).get("abbreviation", "?")
+        jersey = p.get("jerseyNumber", "")
+        name = p.get("person", {}).get("fullName", "Unknown")
+        hitting = p.get("seasonStats", {}).get("batting", {})
+        print(f"  {'':>2}  {pos:<4}  {jersey:>3}  {name:<27}  {fmt_hitting(hitting)}")
 
 
 # ── Google Sheets ──────────────────────────────────────────────────────────────
@@ -328,11 +350,12 @@ def _hitting_row(order, p):
     """Build a single spreadsheet row for a batter."""
     s = p.get("seasonStats", {}).get("batting", {})
     pos = p.get("position", {}).get("abbreviation", "?")
+    jersey = p.get("jerseyNumber", "")
     name = p.get("person", {}).get("fullName", "Unknown")
     if not s or s.get("gamesPlayed", 0) == 0:
-        return [order, pos, name, "", "", "", "", ""]
+        return [order, pos, jersey, name, "", "", "", "", ""]
     return [
-        order, pos, name,
+        order, pos, jersey, name,
         s.get("avg", ""),
         s.get("homeRuns", ""),
         s.get("rbi", ""),
@@ -344,12 +367,13 @@ def _hitting_row(order, p):
 def _pitching_row(role, p):
     """Build a single spreadsheet row for a pitcher."""
     s = p.get("seasonStats", {}).get("pitching", {})
+    jersey = p.get("jerseyNumber", "")
     name = p.get("person", {}).get("fullName", "Unknown")
     no_stats = not s or float(s.get("inningsPitched", 0)) == 0.0
     if no_stats:
-        return [role, name, "", "", "", "", ""]
+        return [role, jersey, name, "", "", "", "", ""]
     return [
-        role, name,
+        role, jersey, name,
         s.get("era", ""),
         f"{s.get('wins', 0)}-{s.get('losses', 0)}",
         s.get("inningsPitched", ""),
@@ -358,20 +382,55 @@ def _pitching_row(role, p):
     ]
 
 
-def build_team_rows(side, boxscore):
-    """Build a 2-D list of spreadsheet rows for one team.
+def build_score_rows(boxscore):
+    """Build the score section for the sheet (always exactly 4 rows).
 
     Layout:
-        Team name
-        (blank)
-        BATTING header row
-        One row per batter in the lineup
-        (blank)
-        PITCHING header row
-        One row per pitcher
-        (blank)  [only if bench is non-empty]
-        BENCH header row
-        One row per bench player
+        SCORE label               1 row
+        Column headers            1 row
+        Away team score row       1 row
+        Home team score row       1 row
+
+    Args:
+        boxscore: Full boxscore dict from fetch_boxscore().
+
+    Returns:
+        List of 4 lists.
+    """
+    rows = [["SCORE"], ["", "Team", "R", "H", "E"]]
+    for side, label in (("away", "Away"), ("home", "Home")):
+        t = boxscore["teams"][side]
+        batting = t.get("teamStats", {}).get("batting", {})
+        fielding = t.get("teamStats", {}).get("fielding", {})
+        rows.append([
+            label,
+            t["team"]["name"],
+            batting.get("runs", 0),
+            batting.get("hits", 0),
+            fielding.get("errors", 0),
+        ])
+    return rows  # always 4 rows
+
+
+def build_team_rows(side, boxscore):
+    """Build a 2-D list of spreadsheet rows for one team with fixed section sizes.
+
+    Every section always occupies the same number of rows so that cell addresses
+    never shift between runs, regardless of game state (pre-game, live, final):
+
+        Team name                           1 row
+        (blank)                             1 row
+        BATTING ORDER label + headers       2 rows
+        Batting order data                  LINEUP_SIZE rows (padded with blanks)
+        (blank)                             1 row
+        CURRENT PITCHER label + headers     2 rows
+        Current pitcher data                1 row  (CURRENT_PITCHER_SIZE)
+        (blank)                             1 row
+        PITCHING STAFF label + headers      2 rows
+        Pitching staff data                 PITCHING_STAFF_SIZE rows (padded)
+        (blank)                             1 row
+        HITTERS label + headers             2 rows
+        Hitter data                         HITTER_SIZE rows (padded)
 
     Args:
         side: 'away' or 'home'.
@@ -388,40 +447,64 @@ def build_team_rows(side, boxscore):
     bullpen = team_data.get("bullpen", [])
     bench = team_data.get("bench", [])
 
-    lineup_ids = batting_order or [
-        int(k[2:]) for k, p in players.items()
-        if p.get("position", {}).get("type") != "Pitcher"
-    ]
-    pitcher_ids = pitchers or bullpen
+    # All hitters: official batting order (if known) followed by bench.
+    # Pre-game, batting_order is empty and bench holds the full position player
+    # roster, so this always produces the complete hitter list either way.
+    all_hitter_ids = list(batting_order) + [p for p in bench if p not in set(batting_order)]
+
+    # Pitching staff: pitchers who've appeared, then unused bullpen.
+    all_pitcher_ids = pitchers + bullpen
+
+    # Current pitcher: last to enter the game; blank pre-game.
+    current_pitcher_id = pitchers[-1] if pitchers else None
 
     rows = []
     rows.append([team_name.upper()])
     rows.append([])
 
-    # Batting
-    rows.append(["#", "POS", "Name", "AVG", "HR", "RBI", "OPS", "SB"])
-    for i, pid in enumerate(lineup_ids):
-        p = players.get(f"ID{pid}", {})
-        order = str(i + 1) if batting_order else ""
-        rows.append(_hitting_row(order, p))
-
+    # ── BATTING ORDER ──────────────────────────────────────────────────────────
+    rows.append(["BATTING ORDER"])
+    rows.append(["#", "POS", "Jersey", "Name", "AVG", "HR", "RBI", "OPS", "SB"])
+    for i in range(LINEUP_SIZE):
+        if i < len(batting_order):
+            p = players.get(f"ID{batting_order[i]}", {})
+            rows.append(_hitting_row(str(i + 1), p))
+        else:
+            rows.append(["", "", "", "", "", "", "", "", ""])
     rows.append([])
 
-    # Pitching
-    if pitcher_ids:
-        rows.append(["Role", "Name", "ERA", "W-L", "IP", "K", "WHIP"])
-        for i, pid in enumerate(pitcher_ids):
-            p = players.get(f"ID{pid}", {})
+    # ── CURRENT PITCHER ────────────────────────────────────────────────────────
+    rows.append(["CURRENT PITCHER"])
+    rows.append(["Role", "Jersey", "Name", "ERA", "W-L", "IP", "K", "WHIP"])
+    if current_pitcher_id:
+        p = players.get(f"ID{current_pitcher_id}", {})
+        role = "SP" if pitchers[0] == current_pitcher_id else "RP"
+        rows.append(_pitching_row(role, p))
+    else:
+        rows.append(["", "", "", "", "", "", "", ""])
+    rows.append([])
+
+    # ── PITCHING STAFF ─────────────────────────────────────────────────────────
+    rows.append(["PITCHING STAFF"])
+    rows.append(["Role", "Jersey", "Name", "ERA", "W-L", "IP", "K", "WHIP"])
+    for i in range(PITCHING_STAFF_SIZE):
+        if i < len(all_pitcher_ids):
+            p = players.get(f"ID{all_pitcher_ids[i]}", {})
             role = "SP" if i == 0 else "RP"
             rows.append(_pitching_row(role, p))
+        else:
+            rows.append(["", "", "", "", "", "", "", ""])
+    rows.append([])
 
-    # Bench
-    if bench:
-        rows.append([])
-        rows.append(["", "POS", "Name", "AVG", "HR", "RBI", "OPS", "SB"])
-        for pid in bench:
-            p = players.get(f"ID{pid}", {})
+    # ── HITTERS ────────────────────────────────────────────────────────────────
+    rows.append(["HITTERS"])
+    rows.append(["", "POS", "Jersey", "Name", "AVG", "HR", "RBI", "OPS", "SB"])
+    for i in range(HITTER_SIZE):
+        if i < len(all_hitter_ids):
+            p = players.get(f"ID{all_hitter_ids[i]}", {})
             rows.append(_hitting_row("", p))
+        else:
+            rows.append(["", "", "", "", "", "", "", ""])
 
     return rows
 
@@ -430,17 +513,20 @@ def write_to_sheet(service, game_info, boxscore):
     """Clear Sheet1 and write game info plus both teams' rosters and stats.
 
     Layout:
-        Game header row (PK, matchup, date, status)
-        (blank)
-        Away team section
+        Game header row (PK, matchup, date, status)   1 row
+        (blank)                                        1 row
+        Score section                                  4 rows  (build_score_rows)
+        (blank)                                        1 row
+        Away team section                              build_team_rows
         (two blank rows)
-        Home team section
+        Home team section                              build_team_rows
 
     Args:
         service: Authenticated Sheets API service from get_sheets_service().
         game_info: Dict with keys gamePk, away, home, date, status.
         boxscore: Full boxscore dict from fetch_boxscore().
     """
+    score_rows = build_score_rows(boxscore)
     away_rows = build_team_rows("away", boxscore)
     home_rows = build_team_rows("home", boxscore)
 
@@ -451,6 +537,8 @@ def write_to_sheet(service, game_info, boxscore):
             game_info.get("date", ""),
             game_info.get("status", ""),
         ],
+        [],
+        *score_rows,
         [],
         *away_rows,
         [],
@@ -558,6 +646,17 @@ def main():
 
     if not _boxscore_has_stats(boxscore):
         backfill_stats(boxscore, season)
+
+    score = build_score_rows(boxscore)
+    away_r, away_h, away_e = score[2][2], score[2][3], score[2][4]
+    home_r, home_h, home_e = score[3][2], score[3][3], score[3][4]
+    away_name = game_info["away"]
+    home_name = game_info["home"]
+    print(f"\n  {'SCORE':}")
+    print(f"  {'':<4}  {'Team':<31}  R   H   E")
+    print(f"  {'-' * 50}")
+    print(f"  Away  {away_name:<31}  {away_r:<3} {away_h:<3} {away_e}")
+    print(f"  Home  {home_name:<31}  {home_r:<3} {home_h:<3} {home_e}")
 
     for side in ("away", "home"):
         display_roster(side, boxscore)
